@@ -3,6 +3,10 @@ import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.124.0/exampl
 import { EffectComposer } from 'https://cdn.jsdelivr.net/npm/three@0.124.0/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'https://cdn.jsdelivr.net/npm/three@0.124.0/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'https://cdn.jsdelivr.net/npm/three@0.124.0/examples/jsm/postprocessing/ShaderPass.js';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.124.0/examples/jsm/loaders/GLTFLoader.js';
+import * as coro from 'https://cdn.jsdelivr.net/gh/nasser/ajeeb-coroutines@8a5776d0/build/coroutines.esm.js'
+
+let schedule = new coro.Schedule()
 
 let scene = new THREE.Scene()
 
@@ -21,14 +25,14 @@ window.onresize = function () {
 }
 window.onresize()
 
-scene.add(new THREE.GridHelper(50, 50))
+// scene.add(new THREE.GridHelper(50, 50))
 new OrbitControls(camera, renderer.domElement)
 
 const geometry = new THREE.BoxGeometry( 10, 10, 10 );
 const material = new THREE.MeshLambertMaterial( { color: 0x00ff00 } );
 const cube = new THREE.Mesh( geometry, material );
 cube.position.y -= 5
-scene.add( cube );
+// scene.add( cube );
 
 scene.add( new THREE.AmbientLight( 0x404040 ) );
 
@@ -371,11 +375,65 @@ rayMarchShader.uniforms.cameraFar.value = camera.far;
 
 composer.addPass(rayMarchShader);
 
+const loader = new GLTFLoader();
+
+const keyspressed = new Set()
+
+document.onkeydown = function(e) {
+    keyspressed.add(e.code)
+}
+
+document.onkeyup = function(e) {
+    keyspressed.delete(e.code)
+}
+
+schedule.add(function* () {
+    let loaded = false, animations = {}
+    let kayakMixer
+    loader.load( 'ggj_boat_nasser.glb', function ( gltf ) {
+        kayakMixer = new THREE.AnimationMixer(gltf.scene)
+        for (const animation of gltf.animations) {
+            animations[animation.name] = kayakMixer.clipAction(animation)
+            animations[animation.name].loop = THREE.LoopOnce
+        }
+        scene.add(gltf.scene)
+        loaded = true
+    })
+
+    yield* coro.waitUntil(_ => loaded)
+
+    schedule.add(function* () {
+        while(true) {
+            if(keyspressed.has('KeyQ')) {
+                console.log('q');
+                animations.OwlRowLeft.reset()
+                animations.OwlRowLeft.play()
+                yield* coro.wait(animations.OwlRowLeft.getClip().duration);
+            } else if(keyspressed.has('KeyW')) {
+                console.log('w');
+                animations.OwlRowRight.reset()
+                animations.OwlRowRight.play()
+                yield* coro.wait(animations.OwlRowRight.getClip().duration);
+            }
+            yield
+        }
+    })
+
+    console.log(animations);
+    // animations.OwlRowLeft.play()
+    
+    while(true) {
+        kayakMixer.update(1/60)
+        rayMarchShader.uniforms.iTime.value += 0.01
+        rayMarchShader.uniforms.cameraOrigin.value = [camera.position.x, camera.position.y, camera.position.z]
+        rayMarchShader.uniforms.cameraAngle.value = [-camera.rotation.z, -camera.rotation.x, -camera.rotation.y]
+        renderer.render( scene, camera );
+        composer.render();
+        yield
+    }
+})
+
 export function render() {
     requestAnimationFrame(render)
-    rayMarchShader.uniforms.iTime.value += 0.01
-    rayMarchShader.uniforms.cameraOrigin.value = [camera.position.x, camera.position.y, camera.position.z]
-    rayMarchShader.uniforms.cameraAngle.value = [-camera.rotation.z, -camera.rotation.x, -camera.rotation.y]
-    renderer.render( scene, camera );
-    composer.render();
+    schedule.tick()
 }
